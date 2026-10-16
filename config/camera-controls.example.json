@@ -1,0 +1,7 @@
+{
+  "exposure_mode": "auto",
+  "exposure_us": 10000.0,
+  "analog_gain": 1.0,
+  "exposure_compensation": 1.25,
+  "white_balance": 1
+}

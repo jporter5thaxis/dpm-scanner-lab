@@ -1,0 +1,7 @@
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+numpy>=1.26,<3
+zxing-cpp>=2.3,<4
+psutil>=6,<8
+python-multipart>=0.0.20,<1
+# OpenCV is installed separately in the private venv. Native capture uses the system GStreamer producer.

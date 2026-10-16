@@ -1,0 +1,19 @@
+[Unit]
+Description=IMX219 camera producer and bounded local controls
+After=nvargus-daemon.service
+Requires=nvargus-daemon.service
+
+[Service]
+Type=simple
+ExecStartPre=/sbin/modprobe v4l2loopback
+# Replace SCANNER_USER and verify the file belongs to this camera's scanner.
+Environment=DPM_CAMERA_SETTINGS=/home/SCANNER_USER/dpm-scanner-lab/data/settings.json
+ExecStart=/usr/bin/python3 -u /usr/local/lib/dpm-scanner-lab/jetson-calibration-camera.py
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+NoNewPrivileges=true
+UnsetEnvironment=DISPLAY WAYLAND_DISPLAY XAUTHORITY
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,30 @@
+# Root-free deployment for the confirmed SSH account.
+# Starts with the user's session. Boot without login requires enabling linger.
+[Unit]
+Description=DPM Scanner Lab (isolated user deployment)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/dpm-scanner-lab
+EnvironmentFile=%h/dpm-scanner-lab/data/service.env
+Environment=DPM_DATA=%h/dpm-scanner-lab/data
+Environment=DPM_RESTRICT_WRITES=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=OPENBLAS_NUM_THREADS=2
+Environment=OMP_NUM_THREADS=2
+UnsetEnvironment=DISPLAY WAYLAND_DISPLAY XAUTHORITY
+ExecStart=%h/dpm-scanner-lab/.venv/bin/python scripts/run.py --host 0.0.0.0 --port 8095
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=20
+KillMode=control-group
+NoNewPrivileges=true
+MemoryMax=1500M
+CPUQuota=200%
+Nice=10
+TasksMax=96
+UMask=0077
+
+[Install]
+WantedBy=default.target
