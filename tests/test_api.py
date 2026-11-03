@@ -1,5 +1,6 @@
 import importlib
 import io
+import threading
 import time
 import cv2
 import numpy as np
@@ -117,6 +118,16 @@ def test_browser_adapter_single_reader_confirmation_and_session_logging(client):
     assert client.get('/api/status').json()['camera']['state']=='STOPPED'
 
 
+def test_stream_ends_once_camera_is_stopped(client):
+    # An endless stream holds the browser connection the client needs for start.
+    result={}
+    reader=threading.Thread(target=lambda:result.update(response=client.get('/api/stream')),daemon=True)
+    reader.start()
+    reader.join(5)
+    assert not reader.is_alive()
+    assert result['response'].status_code==200 and result['response'].content==b''
+
+
 def test_video_replay_frame_stepping(client,tmp_path):
     image=barcode()
     h,w=image.shape[:2]
@@ -133,6 +144,22 @@ def test_video_replay_frame_stepping(client,tmp_path):
 
 def test_cross_origin_writes_blocked(client):
     assert client.post('/api/camera/start',headers={'Origin':'https://example.org'}).status_code==403
+
+
+def test_iotiview_clients_can_drive_scanner_from_browser(client):
+    origin={'Origin':'https://dev.iotiview.io'}
+    preflight=client.options('/api/settings',headers={**origin,'Access-Control-Request-Method':'PATCH','Access-Control-Request-Headers':'content-type'})
+    assert preflight.status_code==200
+    assert preflight.headers['access-control-allow-origin']==origin['Origin']
+    assert 'PATCH' in preflight.headers['access-control-allow-methods']
+    for response in (client.post('/api/camera/start',headers=origin),client.get('/api/status',headers=origin),
+                     client.post('/api/camera/stop',headers=origin)):
+        assert response.status_code==200
+        assert response.headers['access-control-allow-origin']==origin['Origin']
+    assert 'latest_scan' in response.json()
+    for lookalike in ('https://app.iotiview.io','https://dev.iotiview.io.evil.com','http://dev.iotiview.io'):
+        blocked=client.post('/api/camera/start',headers={'Origin':lookalike})
+        assert blocked.status_code==403 and 'access-control-allow-origin' not in blocked.headers
 
 
 def test_lan_token_and_same_site_cookie(tmp_path,monkeypatch):

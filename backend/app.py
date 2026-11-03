@@ -16,6 +16,7 @@ import urllib.request
 import cv2
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -42,6 +43,10 @@ jobs = ReplayJobs()
 offline_lock = threading.Lock()
 AUTH_TOKEN = os.environ.get('DPM_TOKEN', '')
 AUTH_COOKIE = secrets.token_urlsafe(32)
+# IoTiView web clients that may call the scanner from the station's browser.
+ALLOWED_ORIGINS = ['https://api.iotiview.io', 'https://uat.iotiview.io',
+                   'https://dev.iotiview.io', 'https://dev1.iotiview.io',
+                   'http://localhost:3000']  # local IoTiView client development
 
 
 @asynccontextmanager
@@ -61,9 +66,15 @@ async def access(request: Request, call_next):
             return JSONResponse({'detail':'Sign in with the scanner lab access token'}, status_code=401)
         if request.method not in ('GET','HEAD','OPTIONS'):
             origin = request.headers.get('origin')
-            if origin and origin != str(request.base_url).rstrip('/') and not (origin in ('http://127.0.0.1:5173','http://localhost:5173') and request.client.host in ('127.0.0.1','::1')):
+            if origin and origin != str(request.base_url).rstrip('/') and origin not in ALLOWED_ORIGINS and not (origin in ('http://127.0.0.1:5173','http://localhost:5173') and request.client.host in ('127.0.0.1','::1')):
                 return JSONResponse({'detail':'Cross-origin writes are not allowed'}, status_code=403)
     return await call_next(request)
+
+
+# Added after access() so it wraps it: preflights are answered first, and
+# rejections still carry CORS headers the client can read.
+app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
+                   allow_methods=['GET','POST','PATCH'], allow_headers=['Content-Type'])
 
 
 @app.exception_handler(ValueError)
@@ -230,10 +241,12 @@ async def browser_frame(request: Request):
 
 
 @app.get('/api/stream')
-async def stream():
+async def stream(request: Request):
     async def frames():
         last = None
-        while True:
+        # End with the capture or the viewer. An endless stream after a stop keeps
+        # the browser's connection busy and blocks that client's next requests.
+        while runtime.camera.state not in ('STOPPING','STOPPED') and not await request.is_disconnected():
             jpeg = runtime.jpeg
             if jpeg and jpeg is not last:
                 last = jpeg
