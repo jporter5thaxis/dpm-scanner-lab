@@ -1,4 +1,31 @@
-# DPM Scanner Lab
+# Camera test bench
+
+This branch runs a camera comparison app on the development PC. From this directory, start Docker Desktop and run:
+
+```sh
+docker compose up --build -d
+```
+
+Open [the camera bench](http://localhost:8097), choose **This browser**, and click **Start preview**. Allow camera access. Once permission is granted, select the Insta360, Arducam, or onboard webcam by name and click **Start preview** again to apply a new selection. A camera must be available to the browser on this computer. For a CSI camera this requires an existing webcam bridge on the machine physically connected to the sensor.
+
+Use the same test target, distance, framing and light for each camera. Save a test shot from each, then compare the full frames and the center detail. The original PNG preserves the delivered frame dimensions. The footer shows the actual dimensions and measured frame rate. Browser resolution choices are preferences, and the camera driver determines which video modes it can deliver. A camera's still-photo megapixel rating can exceed its video resolution.
+
+The app keeps saved frames in a Docker volume. `docker compose down` stops the bench and retains the shots. It binds only to this computer's loopback interface.
+
+**Optional Linux camera access.** For a webcam connected directly to a Linux Docker host, identify its capture device with `v4l2-ctl --list-devices` and the device group with `stat -c %g /dev/video0`. Create a local `compose.override.yaml` using your device and numeric group:
+
+```yaml
+services:
+  lab:
+    devices:
+      - "/dev/video0:/dev/video0"
+    group_add:
+      - "44"
+```
+
+Run `docker compose up -d` and select **Docker host (Linux)**. Map an existing virtual webcam node for CSI. Raw Bayer sensor nodes need a host camera service to produce a usable webcam stream. USB cameras use the formats their drivers advertise.
+
+## Original DPM Scanner Lab
 
 Working reference implementation for IMX219 camera capture, smooth live preview,
 engraved Data Matrix scanning, and decoded-code tracking on NVIDIA Jetson.

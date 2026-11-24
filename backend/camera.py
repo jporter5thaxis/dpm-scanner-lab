@@ -92,6 +92,9 @@ class OpenCVAdapter:
             # Renegotiating a loopback consumer can invalidate the live producer's
             # buffers. Its existing service owns the format and frame rate.
             if not producer_owned:
+                fourcc = getattr(cfg, 'fourcc', None)
+                if fourcc:
+                    self.capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc))
                 self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.width)
                 self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.height)
                 self.capture.set(cv2.CAP_PROP_FPS, cfg.fps)

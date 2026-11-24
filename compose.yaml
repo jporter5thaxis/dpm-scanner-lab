@@ -1,0 +1,10 @@
+name: camera-testv2
+services:
+  lab:
+    build: .
+    ports:
+      - "127.0.0.1:8097:8097"
+    volumes:
+      - captures:/captures
+volumes:
+  captures:

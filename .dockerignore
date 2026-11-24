@@ -1,0 +1,11 @@
+**
+!requirements-jetson-lock.txt
+!backend/
+!backend/__init__.py
+!backend/camera.py
+!backend/config.py
+!backend/vision.py
+!camera_lab/
+!camera_lab/app.py
+!camera_lab/web/
+!camera_lab/web/*
