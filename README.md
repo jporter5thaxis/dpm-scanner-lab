@@ -1,29 +1,39 @@
 # Camera test bench
 
-This branch runs a camera comparison app on the development PC. From this directory, start Docker Desktop and run:
+The camera lab captures, measures, and saves video frames inside one Docker container. The browser displays the preview and comparison controls. Python, OpenCV, the frontend, and the V4L2 diagnostic tools ship in the image. Captures persist in a Docker-managed volume.
+
+## Insta360 Link 2C Pro
+
+The Link 2C Pro supports USB Video Class (UVC) capture on Linux. The Linux kernel on the Docker host binds the webcam to `uvcvideo` and supplies a video device to the container. Insta360 lists its Link Controller desktop app for Windows and macOS. Basic webcam capture works through the Linux UVC interface. [Manufacturer compatibility](https://onlinemanual.insta360.com/link2cpro/en-us/faq/compatibility) · [Linux UVC driver](https://www.kernel.org/doc/html/latest/userspace-api/media/drivers/uvcvideo.html)
+
+1. Plug the camera into the Linux development machine with its USB data cable. List the available capture interfaces:
+
+   ```sh
+   ls -l /dev/v4l/by-id/
+   ```
+
+2. Choose the Insta360 entry ending in `video-index0`. Set the variable to the exact path printed above. If the host does not create stable aliases, select the corresponding `/dev/videoN` using the names in `/sys/class/video4linux/video*/name`.
+
+   ```sh
+   export CAMERA_DEVICE=/dev/v4l/by-id/REPLACE_WITH_YOUR_INSTA360-video-index0
+   export CAMERA_GID="$(stat -Lc %g "$CAMERA_DEVICE")"
+   docker compose -f compose.yaml -f compose.camera.yaml up --build -d
+   ```
+
+3. Open [the camera bench](http://localhost:8097). Click **Refresh cameras** and expand **Camera driver report**. Check the card name, bound driver, available formats, and focus/exposure controls. Select an advertised capture mode and click **Start preview**. The live footer shows the delivered frame dimensions and measured capture FPS.
+
+4. Save a test shot for each camera at the same distance and lighting. Compare the originals and their center crops. To switch the mapped camera, repeat step 2 with the new device and recreate the container with `up -d --force-recreate` using both Compose files. The saved shots remain in the volume.
+
+**Windows Docker Desktop.** Running `docker compose up --build -d` starts the bench on localhost for development, including when no camera is attached. For physical capture, its Linux engine must expose a working V4L2 capture node before the device can be mapped. A webcam visible in Windows Device Manager alone is insufficient. USB forwarding and kernel webcam support depend on the Docker backend. A native Linux Docker host with UVC support provides the most direct physical test. [Docker Desktop USB support](https://docs.docker.com/desktop/features/usbip/)
+
+**Diagnostic commands.** Once the camera is mapped, run these from the repository. Stop any live preview before the stream test. The test requests 60 buffers in the currently negotiated mode. Successful completion and frame progress confirm delivery through V4L2.
 
 ```sh
-docker compose up --build -d
+docker compose exec lab v4l2-ctl -d /dev/video0 --info --list-formats-ext --list-ctrls-menus
+docker compose exec lab timeout 15 v4l2-ctl -d /dev/video0 --stream-mmap=4 --stream-count=60 --stream-to=/dev/null
 ```
 
-Open [the camera bench](http://localhost:8097), choose **This browser**, and click **Start preview**. Allow camera access. Once permission is granted, select the Insta360, Arducam, or onboard webcam by name and click **Start preview** again to apply a new selection. A camera must be available to the browser on this computer. For a CSI camera this requires an existing webcam bridge on the machine physically connected to the sensor.
-
-Use the same test target, distance, framing and light for each camera. Save a test shot from each, then compare the full frames and the center detail. The original PNG preserves the delivered frame dimensions. The footer shows the actual dimensions and measured frame rate. Browser resolution choices are preferences, and the camera driver determines which video modes it can deliver. A camera's still-photo megapixel rating can exceed its video resolution.
-
-The app keeps saved frames in a Docker volume. `docker compose down` stops the bench and retains the shots. It binds only to this computer's loopback interface.
-
-**Optional Linux camera access.** For a webcam connected directly to a Linux Docker host, identify its capture device with `v4l2-ctl --list-devices` and the device group with `stat -c %g /dev/video0`. Create a local `compose.override.yaml` using your device and numeric group:
-
-```yaml
-services:
-  lab:
-    devices:
-      - "/dev/video0:/dev/video0"
-    group_add:
-      - "44"
-```
-
-Run `docker compose up -d` and select **Docker host (Linux)**. Map an existing virtual webcam node for CSI. Raw Bayer sensor nodes need a host camera service to produce a usable webcam stream. USB cameras use the formats their drivers advertise.
+If the report is empty, check the device mapping. For a permission error, check the numeric group of the actual device. If the product appears but has no capture formats, inspect its other video interface. For a CSI camera, map the existing processed virtual webcam on its host. The bench serves only on localhost by default.
 
 ## Original DPM Scanner Lab
 

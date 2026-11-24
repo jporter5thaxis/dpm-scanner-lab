@@ -1,0 +1,6 @@
+services:
+  lab:
+    devices:
+      - "${CAMERA_DEVICE:?Set CAMERA_DEVICE to the host capture device}:/dev/video0:rw"
+    group_add:
+      - "${CAMERA_GID:?Set CAMERA_GID to the numeric group owning the device}"

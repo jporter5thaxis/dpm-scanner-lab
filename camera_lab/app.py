@@ -14,12 +14,11 @@ from types import SimpleNamespace
 import uuid
 
 import cv2
-import numpy as np
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from backend.camera import CameraManager, v4l2_loopback
+from backend.camera import CameraManager
 from backend.vision import quality
 
 ROOT = Path(__file__).resolve().parent
@@ -31,12 +30,10 @@ selection = None
 session = None
 
 
-def device_modes(node):
-    output = subprocess.run(['v4l2-ctl', '-d', str(node), '--list-formats-ext'],
-                            capture_output=True, text=True, timeout=3)
+def device_modes(formats):
     modes = []
     fmt = size = None
-    for line in output.stdout.splitlines():
+    for line in formats.splitlines():
         match = re.search(r"\[\d+\]: '(.{4})'", line)
         if match:
             fmt, size = match[1], None
@@ -49,21 +46,44 @@ def device_modes(node):
     return modes
 
 
-def devices():
-    found = []
-    for entry in sorted(Path('/sys/class/video4linux').glob('video[0-9]*')):
-        try:
-            name = (entry / 'name').read_text().strip()
-            number = int(entry.name[5:])
-            driver = (entry / 'device/driver').resolve().name
-            if driver != 'uvcvideo' and not v4l2_loopback(number):
-                continue
-            modes = device_modes(Path('/dev') / entry.name)
-            if modes:
-                found.append(dict(device=number, name=name, modes=modes))
-        except (OSError, subprocess.TimeoutExpired, ValueError):
+def query_node(node, option):
+    result = subprocess.run(['v4l2-ctl', '-d', str(node), option], capture_output=True,
+                            text=True, errors='replace', timeout=3)
+    if result.returncode:
+        raise ValueError((result.stderr or result.stdout).strip() or 'Device query failed.')
+    return result.stdout
+
+
+def inspect_nodes(include_controls=False):
+    nodes = []
+    for node in sorted(Path('/dev').glob('video[0-9]*')):
+        if not re.fullmatch(r'video[0-9]+', node.name):
             continue
-    return found
+        item = dict(device=int(node.name[5:]), path=str(node), modes=[])
+        nodes.append(item)
+        try:
+            info = query_node(node, '--info')
+            fields = {k.strip(): v.strip() for line in info.splitlines() if ':' in line
+                      for k, v in [line.split(':', 1)]}
+            item.update(driver=fields.get('Driver name', ''), name=fields.get('Card type', node.name),
+                        bus=fields.get('Bus info', ''))
+            if item['driver'] not in ('uvcvideo', 'v4l2 loopback', 'v4l2loopback'):
+                item['issue'] = 'This node requires a USB webcam or virtual webcam driver.'
+                continue
+            formats = query_node(node, '--list-formats-ext')
+            item['modes'] = device_modes(formats)
+            if not item['modes']:
+                item['issue'] = 'No supported capture modes. Check for another video node on this camera.'
+            if include_controls:
+                item['formats'] = formats.strip()
+                item['controls'] = query_node(node, '--list-ctrls-menus').strip()
+        except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+            item['issue'] = str(exc)
+    return nodes
+
+
+def devices():
+    return [node for node in inspect_nodes() if node['modes']]
 
 
 @asynccontextmanager
@@ -89,6 +109,11 @@ class Start(BaseModel):
     width: int
     height: int
     fps: float
+
+
+@app.get('/api/driver-report')
+def driver_report():
+    return {'nodes': inspect_nodes(include_controls=True)}
 
 
 @app.get('/api/devices')
@@ -161,29 +186,6 @@ def capture(req: Shot):
         if req.session != session or not selection or reader.state != 'RUNNING' or not frame or time.monotonic()-frame.captured > 2:
             raise HTTPException(409, 'Wait for a fresh frame from the selected camera.')
         return save_frame(frame.image, selection['name'], selection.copy(), reader.fps, req.note)
-
-
-@app.post('/api/browser-shot')
-async def browser_shot(request: Request, camera: str = Query(default='Browser camera', max_length=256),
-                       note: str = Query(default='', max_length=160), fps: float = Query(default=0, ge=0, le=1000, allow_inf_nan=False)):
-    if request.headers.get('content-type') != 'image/png':
-        raise HTTPException(415, 'Expected a PNG frame.')
-    data = bytearray()
-    async for chunk in request.stream():
-        if len(data) + len(chunk) > 160 * 1024**2:
-            raise HTTPException(413, 'Camera frame is too large.')
-        data.extend(chunk)
-    if data[:8] != bytes.fromhex('89504e470d0a1a0a') or data[12:16] != b'IHDR':
-        raise HTTPException(422, 'Invalid PNG frame.')
-    width, height = (int.from_bytes(data[i:i+4], 'big') for i in (16, 20))
-    if not 0 < width * height <= 60_000_000:
-        raise HTTPException(413, 'Camera frame dimensions exceed the supported range.')
-    def store():
-        image = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
-        if image is None:
-            raise HTTPException(422, 'Could not read the camera frame.')
-        return save_frame(image, camera, {'source': 'browser'}, fps, note)
-    return await asyncio.to_thread(store)
 
 
 def save_frame(image, camera, requested, fps, note):
