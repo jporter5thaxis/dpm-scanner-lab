@@ -1,10 +1,15 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Camera test bench</title><link rel="stylesheet" href="/style.css"><script type="module" src="/lab.js"></script></head>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Camera test bench</title><link rel="stylesheet" href="/style.css?v=aim2"><script type="module" src="/lab.js?v=aim2"></script></head>
 <body><header><strong>Camera test bench</strong><span>Camera quality lab</span></header><main>
 <section class="intro"><h1>Live comparison</h1><button id="refresh">Refresh cameras</button></section>
 <div class="bench"><aside><h2>Capture setup</h2><label>Camera<select id="device"></select></label><label>Capture mode<select id="mode"></select></label><button class="primary" id="start" disabled>Start preview</button><button id="stop" disabled>Stop camera</button><hr>
+<label>Scan strategy<select id="strategy"><option value="center">Center first · Data Matrix</option><option value="full">Full frame · baseline</option></select></label>
 <button id="scan" aria-pressed="false" disabled>Enable QR reading</button>
 <p id="scan-result" role="status"></p>
 <hr><label>Test note<input id="note" maxlength="160" placeholder="e.g. Fine print, 6 inches"></label><button id="capture" disabled>Save test shot</button><p id="notice" role="status"></p><details><summary>Camera driver report</summary><pre id="report"></pre></details></aside>
-<section class="monitor"><div class="screen"><img id="feed" hidden alt="Live camera preview"><p id="idle">Select a camera and start the preview.</p></div><footer><strong id="source">Camera idle</strong><span id="stats"></span></footer></section></div>
+<section class="monitor"><div class="screen"><img id="feed" hidden alt="Live camera preview"><p id="idle">Select a camera and start the preview.</p></div><footer><strong id="source">Camera idle</strong><span id="stats"></span></footer></section>
+<aside class="detection-panel"><h2>Detection history</h2>
+<label class="inline"><input type="checkbox" id="repeats"> Include repeat reads</label>
+<p class="timing-key">Trial starts when reading is enabled. Frame time runs from capture to decode.</p>
+<ol id="readings" aria-label="Recent detections"></ol></aside></div>
 <section><div class="intro"><h2>Compare test shots</h2><label class="inline"><input id="detail" type="checkbox"> Center detail (256 px)</label></div><p>Use the same subject, framing and light. Select up to three saved shots.</p><div class="comparisons" id="cards"></div><h3>Saved shots</h3><div id="history"></div></section>
 </main></body></html>

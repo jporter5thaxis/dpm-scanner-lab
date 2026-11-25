@@ -215,6 +215,11 @@ class Validator:
         return True, 'Confirmed'
 
 
+def aim_bounds(width, height):
+    """Native-pixel rectangle shared by center-first acquisition and its preview guide."""
+    return width // 3, height // 4, width - width // 3, height - height // 4
+
+
 class Pipeline:
     def __init__(self):
         self.tracks = []
@@ -307,7 +312,7 @@ class Pipeline:
         self.tracks = [t for t in self.tracks if now-t.last_seen <= cfg.candidate_timeout
                        and (not t.value or now-t.decoded_at < max(.65, cfg.candidate_timeout))]
 
-    def process(self, image, cfg: Settings, timestamp=None):
+    def process(self, image, cfg: Settings, timestamp=None, *, center_first=False, record_read_times=False):
         begin = time.perf_counter()
         now = time.monotonic() if timestamp is None else timestamp
         self.frame_id += 1
@@ -322,10 +327,10 @@ class Pipeline:
         if cfg.barcode_mode == 'qr_and_data_matrix':
             formats.append(zxingcpp.BarcodeFormat.QRCode)
 
-        def read(source, label, origin=(0, 0), scale=1, downscale=False, binary=False):
+        def read(source, label, origin=(0, 0), scale=1, downscale=False, binary=False, symbols=None):
             nonlocal attempts, decode_ms
             started = time.perf_counter()
-            results = zxingcpp.read_barcodes(source, formats=formats, try_rotate=True,
+            results = zxingcpp.read_barcodes(source, formats=symbols or formats, try_rotate=True,
                                             try_downscale=downscale, try_invert=True,
                                             binarizer=zxingcpp.Binarizer.BoolCast if binary else zxingcpp.Binarizer.LocalAverage)
             attempts += 1
@@ -365,6 +370,8 @@ class Pipeline:
                         'points': points.tolist(), 'eligible': eligible}
                 decoded.append(item)
                 if eligible:
+                    if center_first or record_read_times:
+                        item['read_at'] = time.monotonic()
                     reads.append(item)
                 if accepted:
                     confirmed.append(item)
@@ -379,9 +386,19 @@ class Pipeline:
             return gray[top:bottom, left:right], (int(left), int(top))
 
         if cfg.auto_decode:
+            if center_first:
+                h, w = gray.shape
+                x, y, right, bottom = aim_bounds(w, h)
+                crop = gray[y:bottom, x:right]
+                crop_deadline = begin + cfg.decoder_budget_ms / 2000
+                for variant, pixels in decode_variants(crop, cfg, crop_deadline):
+                    if read(pixels, f'aiming box / {variant}', (x, y),
+                            symbols=[zxingcpp.BarcodeFormat.DataMatrix]) and reads:
+                        break
+            center_hit = bool(reads)
             # A current tracked crop is usually tiny relative to a 1080p frame.
             known = [t for t in self.tracks if t.value and t.state != 'LOST' and now-t.decoded_at < .65]
-            for t in known[:3]:
+            for t in ([] if center_hit else known[:3]):
                 if attempts and time.perf_counter() >= deadline:
                     break
                 source, origin = crop_input(t)
@@ -395,7 +412,7 @@ class Pipeline:
                     read(source, f'tracked ROI T{t.id} / raw', origin)
             # Full-resolution acquisition cannot be starved by contour discovery.
             # Periodic global search also detects a second holder entering the view.
-            global_search = not decoded or self.frame_id % cfg.search_interval == 0
+            global_search = (center_first and not center_hit) or not decoded or self.frame_id % cfg.search_interval == 0
             if global_search and cfg.preprocess and cfg.barcode_mode == 'data_matrix' and max(gray.shape) >= 640:
                 # Run before an expensive raw scan can consume the whole budget.
                 # Coordinates are mapped back to the original capture below.

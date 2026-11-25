@@ -11,14 +11,17 @@ from backend.vision import Pipeline
 
 
 class ScanTrial:
-    def __init__(self, reader):
+    def __init__(self, reader, history, center_first=True):
         self.reader = reader
+        self.history = history
+        self.center_first = center_first
         self.settings = Settings(**PRESETS['QR + Data Matrix'])
         self.pipeline = Pipeline()
         self.started = time.monotonic()
         previous = reader.snapshot()
         self.initial_sequence = previous.sequence if previous else None
-        self.result = dict(first_read_ms=None, first_confirmed_ms=None, count=0, latest=None, error=None)
+        self.result = dict(first_read_ms=None, first_confirmed_ms=None, count=0, latest=None, error=None,
+                           center_first=center_first)
         self.anchor = None
         self.stop_event = threading.Event()
         self.worker = threading.Thread(target=self.run, name='camera-lab-decoder', daemon=True)
@@ -37,16 +40,17 @@ class ScanTrial:
                 if (self.reader.state == 'RUNNING' and frame and frame.sequence != last
                         and frame.captured >= self.started and tick - frame.captured < 2):
                     last = frame.sequence
-                    report = self.pipeline.process(frame.image, self.settings, timestamp=frame.captured)
-                    elapsed = round((time.monotonic() - self.started) * 1000)
+                    report = self.pipeline.process(frame.image, self.settings, timestamp=frame.captured,
+                                                   center_first=self.center_first, record_read_times=True)
                     result = self.result.copy()
                     if report['reads'] and result['first_read_ms'] is None:
-                        result['first_read_ms'] = elapsed
+                        result['first_read_ms'] = round((report['reads'][0]['read_at'] - self.started) * 1000)
                     for item in report['confirmed']:
                         if result['first_confirmed_ms'] is None:
-                            result['first_confirmed_ms'] = elapsed
+                            result['first_confirmed_ms'] = round((item['read_at'] - self.started) * 1000)
                         result['count'] += 1
                         result['latest'] = {key: item[key] for key in ('value', 'symbology')}
+                    self.history.record(report['reads'], self.started, frame.captured, self.center_first)
                     self.result = result
                     tracks = [track for track in report['tracks'] if track['value'] and track['state'] != 'LOST']
                     self.anchor = None

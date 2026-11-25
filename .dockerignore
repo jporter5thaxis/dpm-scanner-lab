@@ -8,5 +8,6 @@
 !camera_lab/
 !camera_lab/app.py
 !camera_lab/scanner.py
+!camera_lab/history.py
 !camera_lab/web/
 !camera_lab/web/*

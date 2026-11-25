@@ -20,13 +20,15 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from backend.camera import CameraManager
-from backend.vision import PreviewTracker, quality
+from backend.vision import PreviewTracker, aim_bounds, quality
+from .history import DetectionHistory
 from .scanner import ScanTrial
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('CAMERA_LAB_DATA', ROOT.parent / 'data' / 'camera-quality'))
 DATA.mkdir(parents=True, exist_ok=True)
 reader = CameraManager()
+history = DetectionHistory(DATA / 'detection-history.sqlite3')
 lock = threading.RLock()
 selection = None
 session = None
@@ -168,6 +170,12 @@ def status():
 class ScanRequest(BaseModel):
     session: str
     enabled: bool
+    center_first: bool = True
+
+
+@app.get('/api/scan-history')
+def scan_history(repeats: bool = False):
+    return history.recent(repeats)
 
 
 @app.post('/api/scan')
@@ -179,7 +187,7 @@ def set_scanning(req: ScanRequest):
         if req.enabled and (reader.state != 'RUNNING' or not reader.status()['resolution']):
             raise HTTPException(409, 'Start the camera and wait for a frame.')
         if req.enabled and trial is None:
-            trial = ScanTrial(reader)
+            trial = ScanTrial(reader, history, req.center_first)
         elif not req.enabled:
             end_trial()
         return {'scan': trial.result if trial else None}
@@ -196,21 +204,26 @@ async def preview(key: str):
             frame = reader.snapshot()
             if frame and frame.sequence != last and time.monotonic() - frame.captured < 2:
                 last = frame.sequence
-                def encode(image, captured, anchor):
+                def encode(image, captured, anchor, guide):
                     h, w = image.shape[:2]
                     if w > 960:
                         image = cv2.resize(image, (960, max(1, round(h*960/w))), interpolation=cv2.INTER_AREA)
+                    else:
+                        image = image.copy()
                     if anchor is not None:
                         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
                         tracks = tracker.update(gray, captured, anchor)
-                        if tracks and w <= 960:
-                            image = image.copy()
                         for track in tracks:
                             cv2.polylines(image, [np.asarray(track['points'], np.int32)], True, (70, 225, 65), 2)
+                    if guide:
+                        left, top, right, bottom = aim_bounds(image.shape[1], image.shape[0])
+                        cv2.rectangle(image, (left, top), (right - 1, bottom - 1), (35, 45, 45), 3)
+                        cv2.rectangle(image, (left, top), (right - 1, bottom - 1), (150, 235, 245), 1)
                     ok, jpg = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 80])
                     return jpg.tobytes() if ok else b''
                 current = trial
-                jpg = await asyncio.to_thread(encode, frame.image, frame.captured, current.anchor if current else None)
+                jpg = await asyncio.to_thread(encode, frame.image, frame.captured, current.anchor if current else None,
+                                             current is None or current.center_first)
                 if jpg and key == session:
                     yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpg + b'\r\n'
             await asyncio.sleep(.04)

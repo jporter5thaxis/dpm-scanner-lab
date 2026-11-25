@@ -45,6 +45,8 @@ async function status() {
   el("capture").disabled=!live || busy;
   el("stop").disabled=!session || busy;
   const scan = s.scan;
+  el("strategy").disabled = !!scan || busy;
+  if (scan) el("strategy").value = scan.center_first ? "center" : "full";
   el("scan").disabled = busy || (!live && !scan);
   el("scan").setAttribute("aria-pressed", String(!!scan));
   el("scan").textContent = scan ? "Stop QR reading" : "Enable QR reading";
@@ -97,12 +99,40 @@ el("start").onclick=()=>action(async()=>{
   await api("start",{device:d.device,name:d.name,...m});
 });
 el("stop").onclick=()=>action(()=>api("stop",{}));
-el("scan").onclick=()=>action(()=>api("scan",{session,enabled:el("scan").getAttribute("aria-pressed")!=="true"}));
+el("scan").onclick=()=>action(()=>api("scan",{
+  session, enabled:el("scan").getAttribute("aria-pressed")!=="true", center_first:el("strategy").value==="center"
+}));
 el("capture").onclick=()=>action(async()=>{
   const s=await api("shots",{session,note:el("note").value.trim()});
   records.unshift(s); selected=[...selected.slice(-2),s.id];renderShots();
   el("notice").textContent="Test shot saved.";
 });
 await action(async()=>{await discover();records=await api("shots");selected=records.slice(0,3).map(s=>s.id);renderShots();});
-async function poll(){try {await status();}catch(e){el("notice").textContent=e.message;}setTimeout(poll,1000);}
+let historyKey;
+async function refreshHistory() {
+  const repeats = el("repeats").checked;
+  const rows = await api("scan-history?repeats="+repeats);
+  if (repeats !== el("repeats").checked) return;
+  const key = [repeats, rows[0]?.id, rows.length].join("/");
+  if (key === historyKey) return;
+  historyKey = key;
+  const list = el("readings");
+  const items = rows.map(row => {
+    const item = document.createElement("li");
+    const clock = new Date(row.at).toLocaleTimeString([], {
+      hour:"2-digit", minute:"2-digit", second:"2-digit", fractionalSecondDigits:3, hour12:false
+    });
+    item.append(text("small",clock+" · "+row.stage), text("strong", row.value),
+      text("span",row.symbology+" · "+row.method),
+      text("span",row.path),
+      text("span","Trial "+row.trial_ms+" ms · Frame "+row.frame_ms+" ms"));
+    return item;
+  });
+  list.replaceChildren(...items);
+  if (!rows.length) list.append(text("li","Waiting for a reading."));
+}
+async function poll(){
+  try {await Promise.all([status(), refreshHistory()]);} catch(e){el("notice").textContent=e.message;}
+  setTimeout(poll,500);
+}
 poll();
