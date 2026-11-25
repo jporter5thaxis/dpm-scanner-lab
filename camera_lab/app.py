@@ -14,12 +14,14 @@ from types import SimpleNamespace
 import uuid
 
 import cv2
+import numpy as np
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from backend.camera import CameraManager
-from backend.vision import quality
+from backend.vision import PreviewTracker, quality
+from .scanner import ScanTrial
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('CAMERA_LAB_DATA', ROOT.parent / 'data' / 'camera-quality'))
@@ -28,6 +30,14 @@ reader = CameraManager()
 lock = threading.RLock()
 selection = None
 session = None
+trial = None
+
+
+def end_trial():
+    global trial
+    if trial is not None:
+        trial.close()
+        trial = None
 
 
 def device_modes(formats):
@@ -89,6 +99,7 @@ def devices():
 @asynccontextmanager
 async def lifespan(app):
     yield
+    end_trial()
     reader.stop()
 
 
@@ -128,6 +139,7 @@ def start(req: Start):
         mode = req.model_dump(exclude={'device', 'name'})
         if not any(d['device'] == req.device and d['name'] == req.name and mode in d['modes'] for d in devices()):
             raise HTTPException(409, 'The camera or mode changed. Refresh devices.')
+        end_trial()
         reader.stop()
         if reader.worker and reader.worker.is_alive():
             raise HTTPException(409, 'Previous camera is still releasing.')
@@ -140,6 +152,7 @@ def start(req: Start):
 def stop():
     global session, selection
     with lock:
+        end_trial()
         session = selection = None
         reader.stop()
     return {'stopped': True}
@@ -148,7 +161,28 @@ def stop():
 @app.get('/api/status')
 def status():
     with lock:
-        return dict(camera=reader.status(), selection=selection, session=session)
+        return dict(camera=reader.status(), selection=selection, session=session,
+                    scan=trial.result if trial else None)
+
+
+class ScanRequest(BaseModel):
+    session: str
+    enabled: bool
+
+
+@app.post('/api/scan')
+def set_scanning(req: ScanRequest):
+    global trial
+    with lock:
+        if req.session != session:
+            raise HTTPException(409, 'Camera selection changed.')
+        if req.enabled and (reader.state != 'RUNNING' or not reader.status()['resolution']):
+            raise HTTPException(409, 'Start the camera and wait for a frame.')
+        if req.enabled and trial is None:
+            trial = ScanTrial(reader)
+        elif not req.enabled:
+            end_trial()
+        return {'scan': trial.result if trial else None}
 
 
 @app.get('/api/preview/{key}')
@@ -157,17 +191,26 @@ async def preview(key: str):
         raise HTTPException(409, 'Camera selection changed')
     async def stream():
         last = None
+        tracker = PreviewTracker()
         while key == session:
             frame = reader.snapshot()
             if frame and frame.sequence != last and time.monotonic() - frame.captured < 2:
                 last = frame.sequence
-                def encode(image):
+                def encode(image, captured, anchor):
                     h, w = image.shape[:2]
                     if w > 960:
                         image = cv2.resize(image, (960, max(1, round(h*960/w))), interpolation=cv2.INTER_AREA)
+                    if anchor is not None:
+                        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                        tracks = tracker.update(gray, captured, anchor)
+                        if tracks and w <= 960:
+                            image = image.copy()
+                        for track in tracks:
+                            cv2.polylines(image, [np.asarray(track['points'], np.int32)], True, (70, 225, 65), 2)
                     ok, jpg = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 80])
                     return jpg.tobytes() if ok else b''
-                jpg = await asyncio.to_thread(encode, frame.image)
+                current = trial
+                jpg = await asyncio.to_thread(encode, frame.image, frame.captured, current.anchor if current else None)
                 if jpg and key == session:
                     yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpg + b'\r\n'
             await asyncio.sleep(.04)

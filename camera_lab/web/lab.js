@@ -44,6 +44,19 @@ async function status() {
   el("stats").textContent=live ? c.resolution.join(" × ")+" · "+c.fps+" capture fps" : c.state;
   el("capture").disabled=!live || busy;
   el("stop").disabled=!session || busy;
+  const scan = s.scan;
+  el("scan").disabled = busy || (!live && !scan);
+  el("scan").setAttribute("aria-pressed", String(!!scan));
+  el("scan").textContent = scan ? "Stop QR reading" : "Enable QR reading";
+  const lines = [];
+  if (scan) {
+    lines.push(scan.error || (scan.latest ? scan.latest.symbology+" · "+scan.latest.value : "Looking for QR or Data Matrix…"));
+    if (scan.first_read_ms !== null) lines.push("First read: "+scan.first_read_ms+" ms");
+    if (scan.first_confirmed_ms !== null) lines.push("First confirmation: "+scan.first_confirmed_ms+" ms");
+    if (scan.count) lines.push("Confirmed scans: "+scan.count);
+  }
+  const summary = lines.join("\n");
+  if (el("scan-result").textContent !== summary) el("scan-result").textContent = summary;
 }
 function renderShots() {
   const history=el("history"), cards=el("cards");
@@ -84,6 +97,7 @@ el("start").onclick=()=>action(async()=>{
   await api("start",{device:d.device,name:d.name,...m});
 });
 el("stop").onclick=()=>action(()=>api("stop",{}));
+el("scan").onclick=()=>action(()=>api("scan",{session,enabled:el("scan").getAttribute("aria-pressed")!=="true"}));
 el("capture").onclick=()=>action(async()=>{
   const s=await api("shots",{session,note:el("note").value.trim()});
   records.unshift(s); selected=[...selected.slice(-2),s.id];renderShots();

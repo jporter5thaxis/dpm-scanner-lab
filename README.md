@@ -4,6 +4,8 @@ The camera lab captures, measures, and saves video frames inside one Docker cont
 
 ## Insta360 Link 2C Pro
 
+To time a scan, hold the code in view and click **Enable QR reading**. The bench runs the original DPM Python pipeline with its **QR + Data Matrix** preset on full-resolution camera frames. First read and first confirmation are measured from enabling the reader on the server and include the time spent waiting for the code. Confirmation uses two independent captured frames. Stop and re-enable QR reading to begin a fresh trial with the same camera settings.
+
 The Link 2C Pro supports USB Video Class (UVC) capture on Linux. The Linux kernel on the Docker host binds the webcam to `uvcvideo` and supplies a video device to the container. Insta360 lists its Link Controller desktop app for Windows and macOS. Basic webcam capture works through the Linux UVC interface. [Manufacturer compatibility](https://onlinemanual.insta360.com/link2cpro/en-us/faq/compatibility) · [Linux UVC driver](https://www.kernel.org/doc/html/latest/userspace-api/media/drivers/uvcvideo.html)
 
 1. Plug the camera into the Linux development machine with its USB data cable. List the available capture interfaces:
